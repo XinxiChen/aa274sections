@@ -1,0 +1,2 @@
+Invoking command in '/home/autonomy/autonomy_ws/src/aa274sections/build/s2_basic': /usr/bin/cmake /home/autonomy/autonomy_ws/src/aa274sections/s2_basic -DCATKIN_INSTALL_INTO_PREFIX_ROOT=0 -DCMAKE_INSTALL_PREFIX=/home/autonomy/autonomy_ws/src/aa274sections/install/s2_basic
+Invoked command in '/home/autonomy/autonomy_ws/src/aa274sections/build/s2_basic' returned '1': /usr/bin/cmake /home/autonomy/autonomy_ws/src/aa274sections/s2_basic -DCATKIN_INSTALL_INTO_PREFIX_ROOT=0 -DCMAKE_INSTALL_PREFIX=/home/autonomy/autonomy_ws/src/aa274sections/install/s2_basic
