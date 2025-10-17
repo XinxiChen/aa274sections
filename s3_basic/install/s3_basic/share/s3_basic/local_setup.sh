@@ -1,0 +1,1 @@
+/home/aa274/autonomy_ws/src/aa274sections/s3_basic/build/s3_basic/ament_cmake_environment_hooks/local_setup.sh
