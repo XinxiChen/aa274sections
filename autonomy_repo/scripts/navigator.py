@@ -1,164 +1,15 @@
 #!/usr/bin/env python3
 from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
-from asl_tb3_msgs.msg import TurtleBotState, TurtleBotControl
 from asl_tb3_lib.math_utils import wrap_angle
-from asl_tb3_lib.tf_utils import quaternion_to_yaw
-from asl_tb3_lib.grids import StochOccupancyGrid2D, snap_to_grid
-import rclpy                    # ROS2 client library
-from rclpy.node import Node     # ROS2 node baseclass
+from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
+
+import rclpy
+
 import numpy as np
-from scipy.interpolate import splev, splrep
-import typing as T
-
-
-class Navigator(BaseNavigator):
-    def __init__(self, kpx: float = 1, kpy: float= 1, kdx: float= 1, kdy: float= 1,
-                 node_name: str ='navigator',) -> None:
-        super().__init__(node_name) 
-        self.kp = 10.0
-        self.kpx = kpx
-        self.kpy = kpy
-        self.kdx = kdx
-        self.kdy = kdy
-
-        self.V_prev = 0
-        self.om_prev = 0
-        self.t_prev = 0
-        self.V_PREV_THRES = 0.0001
-
-
-        self.coeffs = np.zeros(8) # Polynomial coefficients for x(t) and y(t) as
-                                  # returned by the differential flatness code
-
-        # self.create_subscription(TurtleBotState, '/tb3_state', self.state_)
-
-
-    def compute_heading_control(self, currState: TurtleBotState, goalState: TurtleBotState) -> TurtleBotControl:
-        error = goalState.theta - currState.theta
-        wrappedDifference = wrap_angle(error)
-        w = self.kp * wrappedDifference
-        controlMsg = TurtleBotControl()
-        controlMsg.omega = w
-        return controlMsg
-
-    def compute_trajectory_tracking_control(self,
-        state: TurtleBotState,
-        plan: TrajectoryPlan,
-        t: float,
-    ) -> TurtleBotControl:
-        """ Compute control target using a trajectory tracking controller
-
-        Args:
-            state (TurtleBotState): current robot state
-            plan (TrajectoryPlan): planned trajectory
-            t (float): current timestep
-
-        Returns:
-            TurtleBotControl: control command
-        """
-        x = state.x
-        y = state.y
-        th = state.theta
-        tck_x = plan.path_x_spline
-        tck_y = plan.path_y_spline
-
-        x_d = splev(t, tck_x, der=0)    
-        xd_d = splev(t, tck_x, der=1)   
-        xdd_d = splev(t, tck_x, der=2)  
-        
-        y_d = splev(t, tck_y, der=0)    
-        yd_d = splev(t, tck_y, der=1)   
-        ydd_d = splev(t, tck_y, der=2)  
-
-        dt = t - self.t_prev
-
-        ########## Code starts here ##########
-        # avoid singularity
-        if abs(self.V_prev) < self.V_PREV_THRES:
-            self.V_prev = self.V_PREV_THRES
-
-        xd = self.V_prev*np.cos(th)
-        yd = self.V_prev*np.sin(th)
-
-        # compute virtual controls
-        u = np.array([xdd_d + self.kpx*(x_d-x) + self.kdx*(xd_d-xd),
-                      ydd_d + self.kpy*(y_d-y) + self.kdy*(yd_d-yd)])
-
-        # compute real controls
-        J = np.array([[np.cos(th), -self.V_prev*np.sin(th)],
-                          [np.sin(th), self.V_prev*np.cos(th)]])
-        a, om = np.linalg.solve(J, u)
-        V = self.V_prev + a*dt
-        ########## Code ends here ##########
-
-        # save the commands that were applied and the time
-        self.t_prev = t
-        self.V_prev = V
-        self.om_prev = om
-
-        control = TurtleBotControl()
-        control.omega = om
-        control.v = V
-
-        return control
-    
-    def reset(self) -> None:
-        self.V_prev = 0.
-        self.om_prev = 0.
-        self.t_prev = 0.
-
-    def compute_trajectory_plan(self,
-        state: TurtleBotState,
-        goal: TurtleBotState,
-        occupancy: StochOccupancyGrid2D,
-        resolution: float,
-        horizon: float,
-    ) -> T.Optional[TrajectoryPlan]:
-        """ Compute a trajectory plan using A* and cubic spline fitting
-
-        Args:
-            state (TurtleBotState): state
-            goal (TurtleBotState): goal
-            occupancy (StochOccupancyGrid2D): occupancy
-            resolution (float): resolution
-            horizon (float): horizon
-
-        Returns:
-            T.Optional[TrajectoryPlan]:
-        """
-        astar = AStar((-horizon+state.x, -horizon+state.y), (horizon+state.x, horizon+state.y), (state.x, state.y), (goal.x, goal.y), occupancy, resolution)
-        solution = astar.solve()
-        if not solution:
-            return None
-        path = np.asarray(astar.path)
-        if len(path) < 4:
-            return None
-        
-        self.reset()
-
-        ts = None
-        path_x_spline = None
-        path_y_spline = None
-        x = path[:,0]
-        y = path[:,1]
-        v_desired = 0.15
-        spline_alpha = 0.05
-        distance_arr = np.diff(path, axis=0)
-        distance_arr = np.sqrt(np.sum(distance_arr**2, axis=1))
-        segment_time = distance_arr/v_desired
-        ts = np.concatenate([[0], np.cumsum(segment_time)])
-        path_x_spline = splrep(ts, x, k=3, s=spline_alpha)
-        path_y_spline = splrep(ts, y, k=3, s=spline_alpha)
-
-        ###### YOUR CODE END HERE ######
-        
-        return TrajectoryPlan(
-            path=path,
-            path_x_spline=path_x_spline,
-            path_y_spline=path_y_spline,
-            duration=ts[-1],
-        )
-
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from scipy.interpolate import splrep, splev
+from numpy import linalg
 
 
 class AStar(object):
@@ -198,7 +49,8 @@ class AStar(object):
               useful here
         """
         ########## Code starts here ##########
-        return self.occupancy.is_free(np.asarray(x))
+        x = np.array(x, dtype=float)
+        return self.occupancy.is_free(x)
         ########## Code ends here ##########
 
     def distance(self, x1, x2):
@@ -213,9 +65,7 @@ class AStar(object):
         HINT: This should take one line. Tuples can be converted to numpy arrays using np.array().
         """
         ########## Code starts here ##########
-        return np.linalg.norm(np.array(x1) - np.array(x2)) # euclidean
-        # return np.sum(np.abs(np.array(x1)-np.array(x2))) # l1 norm
-        # return np.max(np.abs(np.array(x1)-np.array(x2))) #l_inf norm
+        return np.linalg.norm(np.array(x1) - np.array(x2))
         ########## Code ends here ##########
 
     def snap_to_grid(self, x):
@@ -251,15 +101,14 @@ class AStar(object):
         """
         neighbors = []
         ########## Code starts here ##########
-        directions = [(0,1), (1,1), (1,0), (1,-1), (0, -1), (-1,-1), (-1,0), (-1,1)]
-        for d in directions:
-            neighbor = tuple(self.resolution*np.array(d) + np.array(x))
-            neighbor = self.snap_to_grid(neighbor)
-            if self.is_free(neighbor):
-                # if neighbor[0] >= 0 and neighbor[0] < self.occupancy.width:
-                #     if neighbor[1] >= 0 and neighbor[1] < self.occupancy.height:
-                #         neighbors.append(neighbor)
-                neighbors.append(neighbor)
+        for i in [-1, 0, 1]:
+            for j in [-1, 0, 1]:
+                if i == 0 and j == 0:
+                    continue
+                nb = (x[0] + i * self.resolution, x[1] + j * self.resolution)
+                nb = self.snap_to_grid(nb)
+                if self.is_free(nb):
+                    neighbors.append(nb)
         ########## Code ends here ##########
         return neighbors
 
@@ -284,6 +133,30 @@ class AStar(object):
             current = path[-1]
         return list(reversed(path))
 
+    def plot_path(self, fig_num=0, show_init_label=True):
+        """Plots the path found in self.path and the obstacles"""
+        if not self.path:
+            return
+
+        self.occupancy.plot(fig_num)
+
+        solution_path = np.asarray(self.path)
+        plt.plot(solution_path[:,0],solution_path[:,1], color="green", linewidth=2, label="A* solution path", zorder=10)
+        plt.scatter([self.x_init[0], self.x_goal[0]], [self.x_init[1], self.x_goal[1]], color="green", s=30, zorder=10)
+        if show_init_label:
+            plt.annotate(r"$x_{init}$", np.array(self.x_init) + np.array([.2, .2]), fontsize=16)
+        plt.annotate(r"$x_{goal}$", np.array(self.x_goal) + np.array([.2, .2]), fontsize=16)
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.03), fancybox=True, ncol=3)
+
+        plt.axis([0, self.occupancy.width, 0, self.occupancy.height])
+
+    def plot_tree(self, point_size=15):
+        plot_line_segments([(x, self.came_from[x]) for x in self.open_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
+        plot_line_segments([(x, self.came_from[x]) for x in self.closed_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
+        px = [x[0] for x in self.open_set | self.closed_set if x != self.x_init and x != self.x_goal]
+        py = [x[1] for x in self.open_set | self.closed_set if x != self.x_init and x != self.x_goal]
+        plt.scatter(px, py, color="blue", s=point_size, zorder=10, alpha=0.2)
+
     def solve(self):
         """
         Solves the planning problem using the A* search algorithm. It places
@@ -300,32 +173,194 @@ class AStar(object):
                 set membership efficiently using the syntax "if item in set".
         """
         ########## Code starts here ##########
-        while len(self.open_set) > 0:
-            x_curr = self.find_best_est_cost_through()
-            if x_curr == self.x_goal:
+        while self.open_set:
+            x = self.find_best_est_cost_through()
+            if x == self.x_goal:
                 self.path = self.reconstruct_path()
                 return True
-            self.open_set.remove(x_curr)
-            self.closed_set.add(x_curr)
-            for x_neigh in self.get_neighbors(x_curr):
-                if x_neigh in self.closed_set:
-                    continue
-                tentative_cost_to_arrive = self.cost_to_arrive[x_curr] + self.distance(x_curr, x_neigh)
-                if x_neigh not in self.open_set:
-                    self.open_set.add(x_neigh)
-                elif tentative_cost_to_arrive > self.cost_to_arrive[x_neigh]:
-                    continue
-                self.came_from[x_neigh] = x_curr
-                self.cost_to_arrive[x_neigh] = tentative_cost_to_arrive
-                self.est_cost_through[x_neigh] = tentative_cost_to_arrive + self.distance(x_neigh, self.x_goal)
+            self.open_set.remove(x)
+            self.closed_set.add(x)
 
+            for nb in self.get_neighbors(x):
+                if nb in self.closed_set:
+                    continue
+                tentative_cost = self.cost_to_arrive[x] + self.distance(x, nb)
+                if nb not in self.open_set:
+                    self.open_set.add(nb)
+                elif tentative_cost > self.cost_to_arrive[nb]:
+                    continue
+                self.came_from[nb] = x
+                self.cost_to_arrive[nb] = tentative_cost
+                self.est_cost_through[nb] = tentative_cost + self.distance(nb, self.x_goal)
+            
         return False
         ########## Code ends here ##########
+
+class DetOccupancyGrid2D(object):
+    """
+    A 2D state space grid with a set of rectangular obstacles. The grid is
+    fully deterministic
+    """
+    def __init__(self, width, height, obstacles):
+        self.width = width
+        self.height = height
+        self.obstacles = obstacles
+
+    def is_free(self, x):
+        """Verifies that point is not inside any obstacles by some margin"""
+        for obs in self.obstacles:
+            if x[0] >= obs[0][0] - self.width * .01 and \
+               x[0] <= obs[1][0] + self.width * .01 and \
+               x[1] >= obs[0][1] - self.height * .01 and \
+               x[1] <= obs[1][1] + self.height * .01:
+                return False
+        return True
+
+    def plot(self, fig_num=0):
+        """Plots the space and its obstacles"""
+        fig = plt.figure(fig_num)
+        ax = fig.add_subplot(111, aspect='equal')
+        for obs in self.obstacles:
+            ax.add_patch(
+            patches.Rectangle(
+            obs[0],
+            obs[1][0]-obs[0][0],
+            obs[1][1]-obs[0][1],))
+        ax.set(xlim=(0,self.width), ylim=(0,self.height))
+
+
+
+
+
+
+class NavigatorNode(BaseNavigator):
+    def __init__(self, kpx: float, kpy: float, kdx: float, kdy: float, V_max: float = 0.5, om_max: float = 1) -> None:
+        super().__init__()
+        self.kp = 2
+        
+        self.V_PREV_THRES = 0.0001
+
+        self.kpx = kpx
+        self.kpy = kpy
+        self.kdx = kdx
+        self.kdy = kdy
+
+        self.coeffs = np.zeros(8) # Polynomial coefficients for x(t) and y(t) as
+                                 # returned by the differential flatness code
+
+    def reset(self) -> None:
+        self.V_prev = 0.
+        self.om_prev = 0.
+        self.t_prev = 0.
+        
+    def compute_heading_control(self, state_cur: TurtleBotState, state_des: TurtleBotState) -> TurtleBotControl:
+        command = TurtleBotControl()
+        error_angle = wrap_angle(state_des.theta - state_cur.theta)
+        omega = self.kp*error_angle
+        command.v = 0.0
+        command.omega = float(omega)
+        return command
+
+    def compute_trajectory_tracking_control(self, state: TurtleBotState, plan: TrajectoryPlan, t: float) -> TurtleBotControl:
+        tck_x = plan.path_x_spline
+        tck_y = plan.path_y_spline
+        x_d, xd_d, xdd_d = [splev(t, tck_x, der=i) for i in range(3)]
+        y_d, yd_d, ydd_d = [splev(t, tck_y, der=i) for i in range(3)]
+
+        goal_dist = np.hypot(x_d - state.x, y_d - state.y)
+        if goal_dist < 0.05:
+            control = TurtleBotControl()
+            control.v = 0.0
+            control.omega = 0.0
+            return control
+
+        dt = t - self.t_prev
+
+        if abs(self.V_prev) < self.V_PREV_THRES:
+            self.V_prev = self.V_PREV_THRES
+
+        xd = self.V_prev*np.cos(state.theta)
+        yd = self.V_prev*np.sin(state.theta)
+
+        # compute virtual controls
+        u = np.array([xdd_d + self.kpx*(x_d-state.x) + self.kdx*(xd_d-xd),
+                      ydd_d + self.kpy*(y_d-state.y) + self.kdy*(yd_d-yd)])
+
+        # compute real controls
+        J = np.array([[np.cos(state.theta), -self.V_prev*np.sin(state.theta)],
+                          [np.sin(state.theta), self.V_prev*np.cos(state.theta)]])
+        a, om = linalg.solve(J, u)
+        V = self.V_prev + a*dt
+        
+        self.t_prev = t
+        self.V_prev = V
+        self.om_prev = om
+
+        control = TurtleBotControl()
+        control.v = V
+        control.omega = om
+        # wrap into TurtleBotControl
+        return control
+
+    def compute_trajectory_plan(self, state, goal, occupancy, resolution, horizon):
+        v_desired = 0.15
+        spline_alpha = 0.05
+
+        # --- Extract start and goal as numpy arrays ---
+        state_xy = np.array([state.x, state.y])
+        goal_xy = np.array([goal.x, goal.y])
+
+        # --- Get map bounds and resolution ---
+        lo = occupancy.origin_xy
+        hi = occupancy.origin_xy + occupancy.size_xy
+        res = getattr(occupancy, "resolution", 0.05)
+
+        print(f"[DEBUG] state_xy={state_xy}, goal_xy={goal_xy}")
+        print(f"[DEBUG] map bounds={lo}->{hi}, res={res}")
+        print(f"[DEBUG] start free={occupancy.is_free(state_xy)}, goal free={occupancy.is_free(goal_xy)}")
+
+        # --- Run A* ---
+        astar = AStar(lo, hi, state_xy, goal_xy, occupancy, resolution=res)
+        if not astar.solve() or len(astar.path) < 4:
+            print("No path found or path too short")
+            return None
+
+        # --- Generate smooth trajectory ---
+        self.reset()
+        path = np.array(astar.path)
+
+        distances = np.linalg.norm(np.diff(path, axis=0), axis=1)
+        times = distances / v_desired
+        ts = np.insert(np.cumsum(times), 0, 0.0)
+        path_x_spline = splrep(ts, path[:, 0], s=spline_alpha)
+        path_y_spline = splrep(ts, path[:, 1], s=spline_alpha)
+
+        return TrajectoryPlan(
+            path=path,
+            path_x_spline=path_x_spline,
+            path_y_spline=path_y_spline,
+            duration=ts[-1],
+        )
+
+
+        
+
+
+
+
 
 
 
 if __name__ == "__main__":
     rclpy.init()            # initialize ROS client library
-    node = Navigator()    # create the node instance
+    node = NavigatorNode(
+        kpx=2.0,
+        kpy=2.0,
+        kdx=0.5,
+        kdy=0.5,
+        V_max=0.5,
+        om_max=1.0
+    )    # create the node instance
     rclpy.spin(node)        # call ROS2 default scheduler
     rclpy.shutdown()        # clean up after node exits
+    
