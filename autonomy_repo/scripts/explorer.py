@@ -52,10 +52,12 @@ class Explorer(Node):
     def state_callback(self, msg: TurtleBotState):
         self.state = msg
         if self.image_detected:
-            self.cmd_nav_pub.publish(self.state)
-        elif self.image_detected is None:
-            self.explore()
-        # self.get_logger().info("Updated state")
+            elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
+            self.get_logger().info(f"Stopping... elapsed: {elapsed:.2f}s / 5.0s")
+            if elapsed < 5.0:
+                # Still stopping - publish current position to stay in place
+                self.cmd_nav_pub.publish(self.state)
+        # Remove the other conditions
         
     def explore(self, msg: Bool = None):
         self.get_logger().info("Exploring frontier")
