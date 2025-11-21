@@ -46,14 +46,14 @@ class Explorer(Node):
         # self.get_logger().info("Updated state")
         
     def explore(self, msg: Bool):
-        if msg:
-            self.get_logger().info("Exploring frontier")
-            next_goal = self.compute_next()
-            if next_goal is not None:
-                self.get_logger().info("Found frontier!")
-                self.cmd_nav_pub.publish(next_goal)
-            else:
-                self.get_logger().info("Nothing found")
+        self.get_logger().info("Exploring frontier")
+        next_goal = self.compute_next()
+        if next_goal is not None:
+            self.get_logger().info("Found frontier!")
+            self.cmd_nav_pub.publish(next_goal)
+        else:
+            self.get_logger().info("Nothing found")
+
                 
             
            
