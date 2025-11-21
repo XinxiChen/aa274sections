@@ -15,6 +15,7 @@ install(PROGRAMS
     scripts/navigator.py
     scripts/perception_controller.py
     scripts/explorer.py
+    scripts/explorer_v1.py
     DESTINATION lib/${PROJECT_NAME}
 )
 
