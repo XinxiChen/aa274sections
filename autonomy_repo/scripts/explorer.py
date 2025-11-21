@@ -27,23 +27,17 @@ class Explorer(Node):
         self.stop_start_time = self.get_clock().now()
 
     def detect_callback(self, msg: Bool):
-        if msg.data or self.image_detected:
-            self.image_detected = True
-            elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
-            if elapsed < 5.0:
-                stop_cmd = TurtleBotControl()
-                stop_cmd.v = 0.0
-                stop_cmd.omega = 0.0
-                self.cmd_nav_pub.publish(stop_cmd)
-                # self.stop_start_time = self.get_clock().now()
-                return
-            else:
+        if msg.data:
+            if not self.image_detected:  # First detection
+                self.image_detected = True
                 self.stop_start_time = self.get_clock().now()
-                self.explore()
+                self.get_logger().info("Stop sign detected! Stopping for 5 seconds...")
+            
+            elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
+            if elapsed >= 5.0:
+                self.get_logger().info("Resuming after 5 seconds")
                 self.image_detected = False
-        else:
-            self.image_detected = False
-            self.stop_start_time = self.get_clock().now()
+                self.explore()
 
     def update_occupancy(self, msg: OccupancyGrid):
         self.occupancy_grid = StochOccupancyGrid2D(
