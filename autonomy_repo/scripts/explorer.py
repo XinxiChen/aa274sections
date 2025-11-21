@@ -8,7 +8,7 @@ from asl_tb3_lib.tf_utils import quaternion_to_yaw
 from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
 from std_msgs.msg import Bool
 import numpy as np
-from numpy import linalg
+from numpy import linalgs
 import typing as T
 from scipy.signal import convolve2d
 
@@ -24,10 +24,26 @@ class Explorer(Node):
         self.state_sub = self.create_subscription(TurtleBotState, "/state", self.state_callback, 10)
         self.cmd_nav_pub = self.create_publisher(TurtleBotState, "/cmd_nav", 10)
         self.detect_image_sub = self.create_subscription(Bool, "/detector_bool", self.detect_callback, 10)
+        self.stop_start_time = self.get_clock().now()
 
     def detect_callback(self, msg: Bool):
-        if msg.data:
+        if msg.data or self.image_detected:
             self.image_detected = True
+            elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
+            if elapsed < 5.0:
+                stop_cmd = TurtleBotControl()
+                stop_cmd.v = 0.0
+                stop_cmd.omega = 0.0
+                self.cmd_nav_pub.publish(stop_cmd)
+                # self.stop_start_time = self.get_clock().now()
+                return
+            else:
+                self.stop_start_time = self.get_clock().now()
+                self.explore()
+                self.image_detected = False
+        else:
+            self.image_detected = False
+            self.stop_start_time = self.get_clock().now()
 
     def update_occupancy(self, msg: OccupancyGrid):
         self.occupancy_grid = StochOccupancyGrid2D(
@@ -43,9 +59,11 @@ class Explorer(Node):
         self.state = msg
         if self.image_detected:
             self.cmd_nav_pub.publish(self.state)
+        elif self.image_detected is None:
+            self.explore()
         # self.get_logger().info("Updated state")
         
-    def explore(self, msg: Bool):
+    def explore(self, msg: Bool = None):
         self.get_logger().info("Exploring frontier")
         next_goal = self.compute_next()
         if next_goal is not None:
