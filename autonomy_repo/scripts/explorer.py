@@ -27,6 +27,7 @@ class Explorer(Node):
         self.stop_start_time = self.get_clock().now()
 
     def detect_callback(self, msg: Bool):
+        self.get_logger().info(f"detect_callback: msg.data={msg.data}, image_detected={self.image_detected}")
         if msg.data:
             if not self.image_detected:  # First detection
                 self.image_detected = True
@@ -34,10 +35,14 @@ class Explorer(Node):
                 self.get_logger().info("Stop sign detected! Stopping for 5 seconds...")
             
             elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
+            self.get_logger().info(f"Elapsed time in detect_callback: {elapsed:.2f}s")
             if elapsed >= 5.0:
                 self.get_logger().info("Resuming after 5 seconds")
                 self.image_detected = False
                 self.explore()
+        else:
+            self.get_logger().info("msg.data is False, resetting image_detected")
+            self.image_detected = False
 
     def update_occupancy(self, msg: OccupancyGrid):
         self.occupancy_grid = StochOccupancyGrid2D(
@@ -51,13 +56,13 @@ class Explorer(Node):
     
     def state_callback(self, msg: TurtleBotState):
         self.state = msg
+        self.get_logger().info(f"state_callback: image_detected={self.image_detected}")
         if self.image_detected:
             elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
             self.get_logger().info(f"Stopping... elapsed: {elapsed:.2f}s / 5.0s")
             if elapsed < 5.0:
                 # Still stopping - publish current position to stay in place
                 self.cmd_nav_pub.publish(self.state)
-        # Remove the other conditions
         
     def explore(self, msg: Bool = None):
         self.get_logger().info("Exploring frontier")
