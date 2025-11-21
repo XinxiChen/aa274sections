@@ -25,6 +25,7 @@ class Explorer(Node):
         self.cmd_nav_pub = self.create_publisher(TurtleBotState, "/cmd_nav", 10)
         self.detect_image_sub = self.create_subscription(Bool, "/detector_bool", self.detect_callback, 10)
         self.stop_start_time = self.get_clock().now()
+        self.timer = self.create_timer(0.1, self.check_stop_timer)  # 新增：每 0.1 秒檢查
 
     def detect_callback(self, msg: Bool):
         self.get_logger().info(f"detect_callback: msg.data={msg.data}, image_detected={self.image_detected}")
@@ -119,7 +120,17 @@ class Explorer(Node):
         dy = frontier_states[closest_idx][1] - self.state.y
         next_frontier.theta = np.arctan2(dy, dx)
         return next_frontier
-        
+
+    def check_stop_timer(self):  # 新增
+        if self.image_detected and self.stop_start_time is not None:
+            elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
+            self.get_logger().info(f"Stopping... {elapsed:.1f}/5.0s")
+            
+            if elapsed >= 5.0:
+                self.get_logger().info("5 seconds elapsed, resuming!")
+                self.image_detected = False
+                self.stop_start_time = None
+                self.explore()        
 
 if __name__ == "__main__":
     rclpy.init()            # initialize ROS client library
