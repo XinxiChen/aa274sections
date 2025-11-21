@@ -121,7 +121,7 @@ class Explorer(Node):
         next_frontier.theta = np.arctan2(dy, dx)
         return next_frontier
 
-    def check_stop_timer(self):  # 新增
+    def check_stop_timer(self):  
         if self.image_detected and self.stop_start_time is not None:
             elapsed = (self.get_clock().now() - self.stop_start_time).nanoseconds / 1e9
             self.get_logger().info(f"Stopping... {elapsed:.1f}/5.0s")
